@@ -4,7 +4,7 @@
  * Numbers in the comments, e.g. (4), refer to the issues listed in
  * Part A, Question 1. Letters, e.g. (a), refer to the fixes in Question 2.
  */
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { AsyncPipe, CurrencyPipe } from '@angular/common';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
@@ -103,23 +103,24 @@ interface TransactionsViewState {
   ],
 })
 export class TransactionsComponent {
-  // (1) The service is properly injected
-  private readonly transactionService = inject(TransactionService);
-
   readonly search = new FormControl('', { nonNullable: true });
 
-  // (a)(4) Single source of truth: the raw transactions from the API.
-  // (3) catchError turns an API failure into an error state for the UI.
-  // (11) startWith gives an initial loading state before data arrives.
-  private readonly state$: Observable<TransactionsViewState> =
-    this.transactionService.getTransactions().pipe(
-      map((items) => ({ items, loading: false, error: false })),
-      catchError(() => of({ items: [], loading: false, error: true })),
-      startWith({ items: [], loading: true, error: false }),
-    );
+  readonly vm$: Observable<TransactionsViewState>;
 
-  private readonly searchTerm$: Observable<string> =
-    this.search.valueChanges.pipe(
+  // (1) The service is properly injected through the constructor
+  constructor(private readonly transactionService: TransactionService) {
+
+    // (a)(4) Single source of truth: the raw transactions from the API.
+    // (3) catchError turns an API failure into an error state for the UI.
+    // (11) startWith gives an initial loading state before data arrives.
+    const state$: Observable<TransactionsViewState> =
+      this.transactionService.getTransactions().pipe(
+        map((items) => ({ items, loading: false, error: false })),
+        catchError(() => of({ items: [], loading: false, error: true })),
+        startWith({ items: [], loading: true, error: false }),
+      );
+
+    const searchTerm$: Observable<string> = this.search.valueChanges.pipe(
       // (7) Wait until the user pauses typing before filtering
       debounceTime(300),
       // (9) Trim spaces and normalise case so "Food " matches "food"
@@ -129,24 +130,22 @@ export class TransactionsComponent {
       startWith(''),
     );
 
-  // (a)(4) The filtered list is derived, never stored separately.
-  // Whenever new data arrives OR the search term changes, the list is
-  // recalculated from both, so the UI and the search box always agree.
-  readonly vm$: Observable<TransactionsViewState> = combineLatest([
-    this.state$,
-    this.searchTerm$,
-  ]).pipe(
-    map(([state, term]) => ({
-      ...state,
-      items: term
-        ? state.items.filter((t) =>
-            // (2) A null category is treated as an empty string, so it no
-            // longer crashes; it simply doesn't match the search
-            (t.category ?? '').toLowerCase().includes(term),
-          )
-        : state.items,
-    })),
-  );
+    // (a)(4) The filtered list is derived, never stored separately.
+    // Whenever new data arrives OR the search term changes, the list is
+    // recalculated from both, so the UI and the search box always agree.
+    this.vm$ = combineLatest([state$, searchTerm$]).pipe(
+      map(([state, term]) => ({
+        ...state,
+        items: term
+          ? state.items.filter((t) =>
+              // (2) A null category is treated as an empty string, so it no
+              // longer crashes; it simply doesn't match the search
+              (t.category ?? '').toLowerCase().includes(term),
+            )
+          : state.items,
+      })),
+    );
+  }
 
   // (c) Rows are identified by id, so unchanged rows are reused
   trackById(_index: number, transaction: Transaction): string {
